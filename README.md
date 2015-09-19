@@ -5,3 +5,5 @@
 [**Rosetta Code** - Hello World Web Server in C](http://rosettacode.org/wiki/Hello_world/Web_server#C)
 
 [**Sourceforge** - Tiny HTTPd](http://sourceforge.net/projects/tinyhttpd/)
+
+[**Stack Exchange** - How to write [an] http server?](https://programmers.stackexchange.com/questions/200821/how-to-write-a-http-server)
