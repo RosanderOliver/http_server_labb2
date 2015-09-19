@@ -1,5 +1,7 @@
 # http_server_labb2
 
+Stilguide: [Linux kernel coding style](https://www.kernel.org/doc/Documentation/CodingStyle)
+
 ### Länkar ang. nätverksdelen:
 
 [**Rosetta Code** - Hello World Web Server in C](http://rosettacode.org/wiki/Hello_world/Web_server#C)
@@ -8,4 +10,4 @@
 
 [**Stack Exchange** - How to write [an] http server?](https://programmers.stackexchange.com/questions/200821/how-to-write-a-http-server)
 
-[**Beej's Guide to Network Programming** - Using Internet Sockets](http://beej.us/guide/bgnet/output/html/multipage/index.html)
+[**Beej's Guide to Network Programming** - Using Internet Sockets](http://beej.us/guide/bgnet/output/html/multipage/index.html) <- MYCKET INFORMATIV!
