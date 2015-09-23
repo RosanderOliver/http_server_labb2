@@ -14,7 +14,7 @@
 
 #define MYPORT "3490"  // the port users will be connecting to
 #define BACKLOG 10     // how many pending connections queue will hold
-#define MAXBUFLEN 1024
+#define BUFLEN 1024
 
 
 int send_all(int sockfd, void *msg, size_t len, int flag)
@@ -35,7 +35,7 @@ int send_all(int sockfd, void *msg, size_t len, int flag)
 void get_request(int sockfd, char *token)
 {
         int in_fd;
-        char buf[1024];
+        char buf[BUFLEN];
         char *filename;
         struct stat stat_buf;      /* argument to fstat */
 
@@ -71,10 +71,9 @@ void head_request(int sockfd, char *token)
 
 void accept_request(int sockfd)
 {
-        //char buf[1024] = "GET ../thttpd.log HTTP/1.1";
-        char buf[1024];
+        char buf[BUFLEN];
 
-        if (recv(sockfd, buf, 1024-1, 0) < 1)
+        if (recv(sockfd, buf, BUFLEN-1, 0) < 1)
                perror("recv");
 
         const char *delim = " ";
@@ -110,7 +109,10 @@ int main(void)
         int sockfd, new_fd, status, len, bytes_sent;
         char s[INET6_ADDRSTRLEN];
 
-        if (chroot("./www") != 0)
+        if (chdir("../../www") != 0)
+                perror("chdir");
+
+        if (chroot("../../www") != 0)
                 perror("chroot");
 
         memset(&hints, 0, sizeof hints);
@@ -149,11 +151,9 @@ int main(void)
 
                 printf("Server: got connection from %s\n", s);
 
-                if (!fork()) { // this is the child process
+                if (fork() == 0) { // this is the child process
                         close(sockfd); // child doesn't need the listener
                         accept_request(new_fd);
-                        //if (send_all(new_fd, msg, strlen(msg), 0) == -1)
-                        //        perror("send");
                         close(new_fd);
                         exit(0);
                 }
