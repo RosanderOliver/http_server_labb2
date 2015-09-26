@@ -15,134 +15,146 @@
 #define SERVICE "3490"
 #define BACKLOG 10
 #define BUFLEN 1024
+#define MAXLEN 1
+#define HTTPVER "1.0"
+#define SERVER "VOhoo 1.0"
+
+struct valid
+{
+        char method[256];
+        char path[256];
+};
+
+typedef struct valid Valid;
 
 int send_all(int sockfd, void *msg, size_t len, int flag)
 {
         char *ptr = (char*) msg;
         while (len > 0) {
-                int rec = send(sockfd, ptr, len, flag);
-                //printf("Sent: %d.\n", rec);
-                if (rec < 1)
+                int sent = send(sockfd, ptr, len, flag);
+                if (sent < 1)
+                        return 0;
+                ptr += sent;
+                len -= sent;
+        }
+        // error buffer full
+        return -1;
+}
+
+int recv_all(int sockfd, void *buf, size_t len, int flag)
+{
+        char *ptr = (char*) buf;
+        while (len > 0) {
+                int rec = recv(sockfd, ptr, len, 0);
+                if (strncmp(ptr, "\r\n", 2) == 0)
                         return 0;
                 ptr += rec;
                 len -= rec;
         }
-
+        // error buffer full
         return -1;
 }
 
-int bad(const int sockfd, const int status_code)
+int validate(char *path, char *filename)
 {
-        char *msg_400 = "HTTP/1.1 400 Bad Request\r\n\r\n";
-        char *msg_403 = "HTTP/1.1 403 Forbidden\r\n\r\n";
-        char *msg_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
-        char *msg_500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-        char *msg_501 = "HTTP/1.1 501 Not Implemnted\r\n\r\n";
+        // undersök om fil är utanför rot, ex /../../
+        // return 403
 
-        char *filename, *msg;
+        char *tmp;
+
+        if (strcmp(path, "/") == 0) {
+                strcpy(filename, "/index.html");
+                return 200;
+        } else if (realpath(path, tmp) == NULL) {
+                perror("realpath");
+                return 404;
+        }
+
+        strcpy(filename, tmp);
+        return 200;
+}
+
+int set_msg(int sockfd, int status_code, Valid *bob)
+{
+        char buf[BUFLEN];
+        char status[50];
+        char filename[250];
         int in_fd;
         struct stat stat_buf;
 
+        if (status_code == 200) {
+                status_code = validate(bob->path, filename);
+        }
+
         switch(status_code) {
         case 500:
-                filename = "500_internal_server_error.html";
-                msg = msg_500;
+                strcpy(filename, "500_internal_server_error.html");
+                strcpy(status, "500 Internal Server Error");
+                break;
+        case 200:
+                strcpy(status, "200 OK");
                 break;
         case 400:
-                filename = "400_bad_request.html";
-                msg = msg_400;
+                strcpy(filename, "400_bad_request.html");
+                strcpy(status, "400 Bad Request");
                 break;
         case 403:
-                filename = "403_forbidden.html";
-                msg = msg_403;
+                strcpy(filename, "403_forbidden.html");
+                strcpy(status, "403 Forbidden");
                 break;
         case 404:
-                filename = "404_not_found.html";
-                msg = msg_404;
+                strcpy(filename, "404_not_found.html");
+                strcpy(status, "404 Not Found");
                 break;
         case 501:
-                filename = "501_not_implemented.html";
-                msg = msg_501;
+                strcpy(filename, "501_not_implemented.html");
+                strcpy(status, "501 Not Implemented");
                 break;
         default:
                 fprintf(stderr, "bad_request: Not an error code! SNH-FL");
+                free(bob);
                 return 1;
         }
 
         if ((in_fd = open(filename, O_RDONLY)) == -1) {
                 perror("open");
-                return bad(sockfd, 500);
+                free(bob);
+                return set_msg(sockfd, 500, NULL);
         }
 
         fstat(in_fd, &stat_buf);
 
-        //off_t offset = 0;
+        //time_t t = time(NULL);
+        //struct tm tm = *localtime(&t);
+
+        char *date = "September";
+
+        snprintf(buf, sizeof(buf),
+            "HTTP/"HTTPVER" %s\r\n"
+            "Content-Type: text/html; charset=UTF-8\r\n"
+            "Content-Length: %d\r\n"
+            "Date: %s\r\n"
+            "Server: "SERVER"\r\n\r\n",
+            status, stat_buf.st_size, date);
+
         // sendall
-        if (send(sockfd, msg, strlen(msg), 0) == -1) {
+        if (send(sockfd, buf, strlen(buf), 0) == -1) {
                 perror("sendall");
                 close(in_fd);
-                return -1;
-        }
-        if (sendfile(sockfd, in_fd, 0, stat_buf.st_size) == -1) {
-                perror("sendfile");
-                close(in_fd);
+                free(bob);
                 return -1;
         }
 
-        close(in_fd);
-        return 0;
-}
-
-int valid_method(int sockfd, char *token)
-{
-        char *msg_200 = "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html; charset=UTF-8\r\n\r\n";
-        int in_fd;
-        char buf[BUFLEN];
-        char *filename;
-        struct stat stat_buf;
-
-        char *method = token;
-
-        if ((token = strtok(NULL, " ")) == NULL) {
-                perror("token 2");
-                bad(sockfd, 400);
-                return -1;
-        }
-
-        // undersök om fil är utanför rot, ex /../../
-
-        if (strcmp(token, "/") == 0)
-                filename = "/index.html";
-        else if ((filename = realpath(token, buf)) == NULL) {
-                perror("realpath");
-                return bad(sockfd, 404);
-        }
-
-        if ((in_fd = open(filename, O_RDONLY)) == -1) {
-                perror("open");
-                return bad(sockfd, 500);
-        }
-
-        fstat(in_fd, &stat_buf);
-        //int *fsize = stat_buf.st_size;
         //off_t offset = 0;
-
-        // sendall
-        if (send(sockfd, msg_200, strlen(msg_200), 0) == -1) {
-                perror("send");
-                close(in_fd);
-                return -1;
-        }
-
-        if (strcmp(method, "GET") == 0) {
+        if (!strcmp(bob->method, "HEAD") == 0) {
                 if (sendfile(sockfd, in_fd, 0, stat_buf.st_size) == -1) {
                         perror("sendfile");
                         close(in_fd);
+                        free(bob);
                         return -1;
                 }
         }
-
+        free(bob);
         close(in_fd);
         return 0;
 }
@@ -150,28 +162,34 @@ int valid_method(int sockfd, char *token)
 int accept_request(int sockfd)
 {
         char buf[BUFLEN];
+        char *token;
 
-        if (recv(sockfd, buf, BUFLEN-1, 0) < 1) {
-               perror("recv");
+        const char *delim = " ";
+
+        if (recv_all(sockfd, buf, BUFLEN-1, 0) != 0) {
+               perror("recv");       
                // error av något slag, int ist void?
         }
 
-        const char *delim = " ";
-        char *token;
-
         if ((token = strtok(buf, delim)) == NULL) {
                 perror("strtok");
-                return bad(sockfd, 400);
+                return set_msg(sockfd, 400, NULL);
         }
 
-        if (strcmp(token, "GET") == 0 || strcmp(token, "HEAD") == 0)
-                valid_method(sockfd, token);
-        else if (strcmp(token, "POST") == 0)
-                return bad(sockfd, 501);
-        else
-                return bad(sockfd, 400);
+        if (strcmp(token, "GET") == 0 || strcmp(token, "HEAD") == 0) {
+                Valid *bob = malloc(sizeof(Valid));
+                strcpy(bob->method, token);
 
-        return 0;
+                if ((token = strtok(NULL, " ")) == NULL) {
+                        return set_msg(sockfd, 400, NULL);
+                }
+
+                strcpy(bob->path, token);
+                return set_msg(sockfd, 200, bob);
+        } else if (strcmp(token, "POST") == 0)
+                return set_msg(sockfd, 501, NULL);
+
+        return set_msg(sockfd, 400, NULL);
 }
 
 // get sockaddr, IPv4 or IPv6:
@@ -250,7 +268,7 @@ void main(void)
 
                 if ((pid = fork()) == -1) {
                         perror("fork");
-                        bad(new_fd, 500);
+                        set_msg(new_fd, 500, NULL);
                 } else if (pid == 0) {
                         close(sockfd);
                         accept_request(new_fd);
