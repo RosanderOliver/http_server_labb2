@@ -6,11 +6,13 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sendfile.h>
+#include <signal.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <limits.h>
+#include <unistd.h>
 
 #define SERVICE "3490"
 #define BACKLOG 10
@@ -141,7 +143,7 @@ int set_msg(int sockfd, int status_code, Valid *bob)
             "Content-Length: %d\r\n"
             "Date: %s\r\n"
             "Server: "SERVER"\r\n\r\n",
-            status, stat_buf.st_size, date);
+            status, 8, date); //stat_buf.st_size
 
         // sendall
         if (send(sockfd, buf, strlen(buf), 0) == -1) {
@@ -200,14 +202,44 @@ void *get_in_addr(struct sockaddr *sa)
         return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+void handle_sigchld(int sig){
+	while( waitpid(-1,0,WNOHANG) > 0){}	// -1 innebär att den väntar på alla pids, WNOHANG sätter inte processen i väntan. waitpid() returnerar 0 om ingen blivit terminerad. 
+}
+
 void main(void)
 {
-        struct sockaddr_storage their_addr;
+	pid_t pid;
+	struct sockaddr_storage their_addr;
         socklen_t addr_size;
         struct addrinfo hints, *res;
-        int sockfd, new_fd, status;
-        pid_t pid;
+        int sockfd, new_fd, status, sid=0;
+        
         char s[INET6_ADDRSTRLEN];
+	
+	pid=fork();
+	if (pid < 0) {
+		exit(EXIT_FAILURE);
+	}
+	else if (pid > 0) {
+		exit(EXIT_SUCCESS);
+	}
+
+	umask(0);
+
+	//Impliment logging here!
+
+	sid = setsid();
+	if (sid<0) {
+		exit(EXIT_FAILURE);
+	}
+
+	close(STDIN_FILENO);
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
+
+		 	
+
+        
 
         // setuid? Till root om under 1024
 
@@ -266,6 +298,11 @@ void main(void)
                         exit(0);
                 }
                 close(new_fd);
+	
+		if (signal(SIGCHLD, SIG_IGN) == SIG_ERR){
+			perror(0);
+			exit(1);
+		}
         }    
         return;
 }
