@@ -16,8 +16,11 @@
 #define BACKLOG 10
 #define BUFLEN 1024
 #define MAXLEN 1
+
 #define HTTPVER "1.0"
 #define SERVER "VOhoo 1.0"
+
+#define DIE(str) {perror(str); exit(1);}
 
 struct valid
 {
@@ -44,14 +47,16 @@ int send_all(int sockfd, void *msg, size_t len, int flag)
 int recv_all(int sockfd, void *buf, size_t len, int flag)
 {
         char *ptr = (char*) buf;
+        int rx = 0;
         while (len > 0) {
-                int rec = recv(sockfd, ptr, len, 0);
-                if (strncmp(ptr, "\r\n", 2) == 0)
+                if (len < BUFLEN-5 && strncmp(ptr-4, "\r\n\r\n", 4) == 0)
                         return 0;
-                ptr += rec;
-                len -= rec;
+                if ((rx = recv(sockfd, ptr, len, 0)) == -1)
+                        return -1;
+                ptr += rx;
+                len -= rx;
         }
-        // error buffer full
+        // set error msg buffer full
         return -1;
 }
 
@@ -60,15 +65,17 @@ int validate(char *path, char *filename)
         // undersök om fil är utanför rot, ex /../../
         // return 403
 
-        char *tmp;
+        // undersök om null
 
-        if (strcmp(path, "/") == 0) {
+        char tmp[30];
+
+        if (path == NULL)
+                return 400;
+        else if (strcmp(path, "/") == 0) {
                 strcpy(filename, "/index.html");
                 return 200;
-        } else if (realpath(path, tmp) == NULL) {
-                perror("realpath");
+        } else if (realpath(path, tmp) == NULL)
                 return 404;
-        }
 
         strcpy(filename, tmp);
         return 200;
@@ -82,9 +89,8 @@ int set_msg(int sockfd, int status_code, Valid *bob)
         int in_fd;
         struct stat stat_buf;
 
-        if (status_code == 200) {
+        if (status_code == 200)
                 status_code = validate(bob->path, filename);
-        }
 
         switch(status_code) {
         case 500:
@@ -146,7 +152,7 @@ int set_msg(int sockfd, int status_code, Valid *bob)
         }
 
         //off_t offset = 0;
-        if (!strcmp(bob->method, "HEAD") == 0) {
+        if (!(strcmp(bob->method, "HEAD") == 0)) {
                 if (sendfile(sockfd, in_fd, 0, stat_buf.st_size) == -1) {
                         perror("sendfile");
                         close(in_fd);
@@ -164,28 +170,21 @@ int accept_request(int sockfd)
         char buf[BUFLEN];
         char *token;
 
-        const char *delim = " ";
+        if (recv_all(sockfd, buf, BUFLEN-1, 0) != 0)
+                DIE("recvall");
 
-        if (recv_all(sockfd, buf, BUFLEN-1, 0) != 0) {
-               perror("recv");       
-               // error av något slag, int ist void?
-        }
-
-        if ((token = strtok(buf, delim)) == NULL) {
-                perror("strtok");
+        if ((token = strtok(buf, " ")) == NULL)
                 return set_msg(sockfd, 400, NULL);
-        }
 
-        if (strcmp(token, "GET") == 0 || strcmp(token, "HEAD") == 0) {
+        if (strcmp(token, "GET") == 0|| strcmp(token, "HEAD") == 0) {
+
                 Valid *bob = malloc(sizeof(Valid));
                 strcpy(bob->method, token);
-
-                if ((token = strtok(NULL, " ")) == NULL) {
-                        return set_msg(sockfd, 400, NULL);
-                }
-
+                token = strtok(NULL, " ");
                 strcpy(bob->path, token);
+
                 return set_msg(sockfd, 200, bob);
+
         } else if (strcmp(token, "POST") == 0)
                 return set_msg(sockfd, 501, NULL);
 
@@ -210,18 +209,13 @@ void main(void)
         pid_t pid;
         char s[INET6_ADDRSTRLEN];
 
-
         // setuid? Till root om under 1024
 
-        if (chdir("../../www") != 0) {
-                perror("chdir");
-                exit(1);
-        }
+        if (chdir("../../www") != 0)
+                DIE("chdir");
 
-        if (chroot("./") != 0) {
-                perror("chroot");
-                exit(1);
-        }
+        if (chroot("./") != 0)
+                DIE("chroot");
 
         memset(&hints, 0, sizeof(hints));
         hints.ai_family = AF_UNSPEC;
@@ -229,28 +223,24 @@ void main(void)
         hints.ai_flags = AI_PASSIVE;
 
         if ((status = getaddrinfo(NULL, SERVICE, &hints, &res)) != 0) {
-                fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
+                herror(gai_strerror(status));
                 exit(1);
         }
 
         // fram till hit pga SERVICE
 
         if ((sockfd = socket(res->ai_family, res->ai_socktype, 
-            res->ai_protocol)) == -1) {
-                perror("socket");
-                exit(1);
-        }
+            res->ai_protocol)) == -1)
+                DIE("socket");
 
         if (bind(sockfd, res->ai_addr, res->ai_addrlen) != 0) {
                 close(sockfd);
-                perror("bind");
-                exit(1);
+                DIE("bind");
         }
 
         if (listen(sockfd, BACKLOG) != 0) {
                 close(sockfd);
-                perror("listen");
-                exit(1);
+                DIE("listen");
         }
 
         while(1) {
@@ -276,7 +266,6 @@ void main(void)
                         exit(0);
                 }
                 close(new_fd);
-        }
-        
+        }    
         return;
 }
