@@ -30,8 +30,12 @@ struct valid
         char path[256];
 };
 
+// TODO: Ta bort?
 typedef struct valid Valid;
 
+
+// TODO: Fixa denna - lägg till båda s/r-all i eget bibliotek
+// (möjligtvis all processkod - getopt, daemon, log, uppstart tar plats)
 int send_all(int sockfd, void *msg, size_t len, int flag)
 {
         char *ptr = (char*) msg;
@@ -180,6 +184,7 @@ int accept_request(int sockfd)
 
         if (strcmp(token, "GET") == 0|| strcmp(token, "HEAD") == 0) {
 
+                // TODO: Bättra namn än "Valid" och "bob".
                 Valid *bob = malloc(sizeof(Valid));
                 strcpy(bob->method, token);
                 token = strtok(NULL, " ");
@@ -203,7 +208,7 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 void handle_sigchld(int sig){
-	while( waitpid(-1,0,WNOHANG) > 0){}	// -1 innebär att den väntar på alla pids, WNOHANG sätter inte processen i väntan. waitpid() returnerar 0 om ingen blivit terminerad. 
+	while(waitpid(-1, 0, WNOHANG) > 0){}	// -1 innebär att den väntar på alla pids, WNOHANG sätter inte processen i väntan. waitpid() returnerar 0 om ingen blivit terminerad. 
 }
 
 void main(void)
@@ -212,34 +217,27 @@ void main(void)
 	struct sockaddr_storage their_addr;
         socklen_t addr_size;
         struct addrinfo hints, *res;
-        int sockfd, new_fd, status, sid=0;
+        int sockfd, new_fd, status;
         
         char s[INET6_ADDRSTRLEN];
 	
-	pid=fork();
-	if (pid < 0) {
-		exit(EXIT_FAILURE);
-	}
-	else if (pid > 0) {
-		exit(EXIT_SUCCESS);
-	}
+	// TODO: Använd EXIT_FAILURE och EXIT_SUCCESS överallt.
+	
+	if ((pid=fork()) < 0)
+	        exit(EXIT_FAILURE);
+	else if (pid > 0)
+	        exit(EXIT_SUCCESS);
 
 	umask(0);
 
 	//Impliment logging here!
 
-	sid = setsid();
-	if (sid<0) {
-		exit(EXIT_FAILURE);
-	}
+	if (setsid() < 0)
+	        exit(EXIT_FAILURE);
 
 	close(STDIN_FILENO);
 	close(STDOUT_FILENO);
 	close(STDERR_FILENO);
-
-		 	
-
-        
 
         // setuid? Till root om under 1024
 
@@ -283,6 +281,8 @@ void main(void)
                         continue;
                 }
 
+
+                // TODO: Ta bort om det inte behövs i loggningen.
                 inet_ntop(their_addr.ss_family, 
                     get_in_addr((struct sockaddr *) &their_addr), s, sizeof(s));
 
@@ -303,6 +303,7 @@ void main(void)
 			perror(0);
 			exit(1);
 		}
-        }    
+        }
+        close(sockfd);
         return;
 }
