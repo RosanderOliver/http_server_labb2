@@ -266,6 +266,7 @@ void main(void)
                         exit(0);
                 }
                 close(new_fd);
-        }    
+        }
+        close(sockfd);
         return;
 }
