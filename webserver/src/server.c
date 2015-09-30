@@ -222,6 +222,9 @@ void main(void)
         struct addrinfo hints, *res;
         int sockfd, new_fd, status;
         char s[INET6_ADDRSTRLEN];
+	
+	char *logName="/home/student/Desktop/DV1510/LAB_2/http_server_labb2/webserver/apa.log";
+	FILE *logFile=fopen(logName, "a+");	
 	openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 	
 	// TODO: Använd EXIT_FAILURE och EXIT_SUCCESS överallt.
@@ -233,10 +236,11 @@ void main(void)
 	}
 	else if (pid > 0)
 	        exit(EXIT_SUCCESS);
-
+	
 	umask(0);
-
 	syslog(LOG_DEBUG, "TEST");
+
+	
 
 	if (setsid() < 0) {
 	        exit(EXIT_FAILURE);
@@ -281,6 +285,7 @@ void main(void)
         }
 
         while(1) {
+		fseek(logFile, 0, SEEK_END);	//Sätter filpekaren till slutet av filen pga fork()?
                 addr_size = sizeof(their_addr);    
                 if ((new_fd = accept(sockfd, (struct sockaddr *) &their_addr, 
                     &addr_size)) == -1) {
@@ -292,9 +297,7 @@ void main(void)
                 // TODO: Ta bort om det inte behövs i loggningen.
                 inet_ntop(their_addr.ss_family, 
                     get_in_addr((struct sockaddr *) &their_addr), s, sizeof(s));
-
-                printf("Server: got connection from %s\n", s);
-
+	
                 if ((pid = fork()) == -1) {
                         syslog(LOG_ERR, "fork() error in request handling");
                         set_msg(new_fd, 500, NULL);
@@ -313,5 +316,6 @@ void main(void)
         }
         close(sockfd);
 	closelog();
+	fclose(logFile);
         return;
 }
