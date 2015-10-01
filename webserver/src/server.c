@@ -31,6 +31,8 @@ struct valid
         char path[256];
 };
 
+typedef enum {FORK, MUX} handling_type;
+
 // TODO: Ta bort?
 typedef struct valid Valid;
 
@@ -214,8 +216,98 @@ void handle_sigchld(int sig){
 	while(waitpid(-1, 0, WNOHANG) > 0){}	// -1: väntar på alla pids, WNOHANG: väntar inte, return 0 om ingen blivit terminerad. 
 }
 
+int set_conf(char **port, handling_type *handling, char **path) {
+        
+        FILE *fp;
+
+        char *line = NULL;
+        size_t len = 0;
+        ssize_t read;
+
+        if ((fp = fopen("/home/vph/http_server_labb2/webserver/src/.lab3-config", "r")) == NULL) {
+                perror("open");
+                return 1;
+        }
+        
+        while ((read = getline(&line, &len, fp)) != -1) {
+
+                // for free to work line must point to the first location,
+                // therefore we use another pointer for manipulation
+                char *beg = line;
+
+                while (isblank(*beg))
+                        beg++;
+
+                if (*beg == '\n')
+                        continue;
+
+                // removes trailing white-space, including newline
+                char *end = beg + strlen(beg) - 1;
+                while(end > beg && isspace(*end)) 
+                        end--;
+                *(end+1) = '\0';
+
+                char *s = beg;
+                
+                if ((s = strchr(beg, ' ')) != NULL)
+                        *s = '\0';
+                ++s;          
+
+                if (strcmp(beg, "path") == 0) {
+                        while (isspace(*s))
+                                ++s;
+                        s = strtok(s, "\"");
+                        if ((*path = realpath(s, NULL)) == NULL) {
+                                perror("realpath");
+                                return 1;
+                        }
+                } else if (strcmp(beg, "port") == 0) {
+                        while (isspace(*s))
+                                ++s;
+                        long int r;
+                        if ((r = strtol(s, NULL, 10)) > 1024 && r < 6400) {
+                                 *port = strdup(s);
+                        } else {
+                                 fprintf(stderr, "Invalid aoeport!\n");
+                                 return 1;
+                        }
+                                
+                } else if (strcmp(beg, "handling") == 0) {
+                        while (isspace(*s))
+                                ++s;
+                        s = strtok(s, "\"");
+                        if (strcmp(s, "fork") == 0)
+                                *handling = FORK;
+                        else if (strcmp(s, "mux") == 0)
+                                *handling = MUX;
+                        else {
+                                fprintf(stderr, "Invalid hand in conf-file!\n");
+                                return 1;
+                        }
+                } else {
+                        fprintf(stderr, 
+                            "Unknown option in the configuration file: %s",
+                             beg);
+                        return 1;
+                }
+           
+        }
+
+        if (line)
+                free(line);
+                
+        close(fp);
+
+        return 0;
+}
+
 void main(void)
 {
+	
+	char *port = NULL;
+        handling_type handling;
+        char *path = NULL;
+        
 	pid_t pid;
 	struct sockaddr_storage their_addr;
         socklen_t addr_size;
@@ -223,24 +315,22 @@ void main(void)
         int sockfd, new_fd, status;
         char s[INET6_ADDRSTRLEN];
 	
+	if (set_conf(&port, &handling, &path) != 0)
+                exit(EXIT_FAILURE);
+
 	char *logName="/home/student/Desktop/DV1510/LAB_2/http_server_labb2/webserver/apa.log";
 	FILE *logFile=fopen(logName, "a+");	
 	openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
-	
-	// TODO: Använd EXIT_FAILURE och EXIT_SUCCESS överallt.
-	
+
 	if ((pid=fork()) < 0) {
 		syslog(LOG_ERR, "Error when calling fork()");
 		exit(EXIT_FAILURE);
-	
 	}
 	else if (pid > 0)
 	        exit(EXIT_SUCCESS);
 	
 	umask(0);
 	syslog(LOG_DEBUG, "TEST");
-
-	
 
 	if (setsid() < 0) {
 	        exit(EXIT_FAILURE);
