@@ -6,14 +6,16 @@
 #include "configparser.h"
 
 int configparser(char **port, handling_type *handling, char **path) {
-        
+
         FILE *fp = NULL;
 
         char *line = NULL;
         size_t len = 0;
         ssize_t read = -1;
 
-        if ((fp = fopen("/home/vph/http_server_labb2/webserver/src/.lab3-config", "r")) == NULL) {
+
+        // TODO: Klara av ~ (tilde) i sökvägen.
+        if ((fp = fopen(CONFPATH, "r")) == NULL) {
                 perror("open");
                 return 1;
         }
@@ -65,11 +67,11 @@ int configparser(char **port, handling_type *handling, char **path) {
                         while (isspace(*optval))
                                 ++optval;
                         optval = strtok(optval, "\"");
-                        if (strcmp(optval, "fork") == 0)
+                        if (strcmp(optval, "fork") == 0) {
                                 *handling = FORK;
-                        else if (strcmp(optval, "mux") == 0)
+                        } else if (strcmp(optval, "mux") == 0) {
                                 *handling = MUX;
-                        else {
+                        } else {
                                 fprintf(stderr, "Invalid hand in conf-file!\n");
                                 return 1;
                         }
