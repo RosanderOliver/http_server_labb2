@@ -415,7 +415,7 @@ void main(int argc, char* argv[])
 
 
 	char *logName="/home/vph/http_server_labb2/webserver/src/web.log";
-	FILE *logFile=fopen(logName, "a+");	
+	*logFile=fopen(logName, "a+");	
 	openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 
         if (runasd) {
