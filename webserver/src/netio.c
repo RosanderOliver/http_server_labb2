@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
+#include <time.h>
 
 
 #include "setpageinfo.h"
@@ -97,6 +97,9 @@ int set_msg(int sockfd, int status_code, struct requestparams *rqp)
         printf("date %s\n", date);
         */
 
+        /* TODO:  "implicit declaration of asprint"
+        http://forums.devshed.com/programming-42/implicit-declaration-function-asprintf-283557.html
+        */
         asprintf(&header,
             "HTTP/"HTTPVER" %s\r\n"
             "Content-Type: text/html; charset=UTF-8\r\n"

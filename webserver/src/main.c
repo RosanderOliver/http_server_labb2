@@ -12,7 +12,6 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <stdarg.h>
-#include <time.h>
 
 // waitpid
 #include <sys/types.h>
@@ -32,6 +31,8 @@
 #define BACKLOG 10
 
 #define DIE(str) {perror(str); exit(1);}
+
+// define DIE(str) {logerror(str); exit(1);}
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -63,9 +64,11 @@ void printall(char *ptr)
         printf("\n\n");
 }
 
-void displayhelp() {
+void logerror
 
+void usage(void) {
 
+// TODO: Skriv trevlig.
 
 }
 
@@ -80,7 +83,7 @@ int arghandler(int *argc, char **argv[], char **port, int *uselogf,
 
                  switch (c) {
                  case 'h':
-                         displayhelp();
+                         usage();
                          return 1;
                  case 'p':
                          if ((pn = strtol(optarg, NULL, 10)) > 1024 
@@ -151,12 +154,13 @@ int main(int argc, char *argv[])
 
         printf("port %s\n", port);
 
-        if (arghandler(&argc, &argv, &port, &uselogf, &logfile, &runasd, &handling) != 0)
+        if (arghandler(&argc, &argv, &port, &uselogf, &logfile, &runasd,
+            &handling) != 0)
                 DIE("arghandler");
 
 	openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 
-        // TODO: Egen funktion?
+        // TODO: Egen funktion demonize?
         if (runasd) {
 	        if ((pid=fork()) < 0)
 	                exit(EXIT_FAILURE);
