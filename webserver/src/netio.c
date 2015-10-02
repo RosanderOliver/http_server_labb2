@@ -6,6 +6,10 @@
 #include <fcntl.h>
 #include <sys/sendfile.h>
 #include <syslog.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 
 
 #include "setpageinfo.h"
@@ -139,7 +143,7 @@ int accept_request(int sockfd)
 
         if (recv_all(sockfd, buf, BUFLEN-1, 0) != 0) {
                 //DIE("recvall");
-                int a = 1;
+                int a = 12;
         }
 
         // en vanlig recv, sedan en recv all?

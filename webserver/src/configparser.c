@@ -3,6 +3,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+// isspace, isblank
+#include <ctype.h>
+
+
 #include "configparser.h"
 
 int configparser(char **port, handling_type *handling, char **path) {

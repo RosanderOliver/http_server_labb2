@@ -1,7 +1,8 @@
+
+// TODO: Rensa.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <signal.h>
 #include <netdb.h>
@@ -13,7 +14,19 @@
 #include <stdarg.h>
 #include <time.h>
 
+// waitpid
+#include <sys/types.h>
+#include <sys/wait.h>
+
+// isprint
+#include <ctype.h>
+
+// umask
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include "configparser.h"
+#include "netio.h"
 
 #define SERVICE "3490"
 #define BACKLOG 10
@@ -134,12 +147,12 @@ int main(int argc, char *argv[])
         // TODO: Gör felmeddelandena kompatibla med perror()?
 
         if (configparser(&port, &handling, &path) != 0)
-                exit(EXIT_FAILURE);
+                DIE("arghandler");
 
         printf("port %s\n", port);
 
         if (arghandler(&argc, &argv, &port, &uselogf, &logfile, &runasd, &handling) != 0)
-                exit(EXIT_FAILURE);
+                DIE("arghandler");
 
 	openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 
