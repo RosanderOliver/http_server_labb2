@@ -11,13 +11,12 @@
 #include <unistd.h>
 #include <time.h>
 
-
 #include "setpageinfo.h"
 #include "netio.h"
 
-int send_all(int sockfd, void *msg, size_t len, int flag)
+int send_all(int sockfd, char *msg, size_t len, int flag)
 {
-        char *ptr = (char*) msg;
+        char *ptr = msg;
         while (len > 0) {
                 int sent = send(sockfd, ptr, len, flag);
                 if (sent < 1)
@@ -29,9 +28,9 @@ int send_all(int sockfd, void *msg, size_t len, int flag)
         return -1;
 }
 
-int recv_all(int sockfd, void *buf, size_t len, int flag)
+int recv_all(int sockfd, char *buf, size_t len, int flag)
 {
-        char *ptr = (char*) buf;
+        char *ptr = buf;
         int rx = 0;
         while (len > 0) {
                 if (len < BUFLEN-5 && strncmp(ptr-4, "\r\n\r\n", 4) == 0)
@@ -47,28 +46,33 @@ int recv_all(int sockfd, void *buf, size_t len, int flag)
 
 int validate(char *path, char **filename)
 {
+
+        // TODO: "URL validation"
         // undersök om fil är utanför rot, ex /../../
         // return 403
 
         if (path == NULL)
-                return 400;
+                return BAD_REQUEST;
         else if (strcmp(path, "/") == 0) {
                 *filename = strdup("/index.html");
-                return 200;
-        } else if ((*filename = realpath(path, NULL)) == NULL) // om NULL ist för tmp, dynamisk
-                return 404;
+                return OK;
+        } else if ((*filename = realpath(path, NULL)) == NULL)
+                return NOT_FOUND;
 
-        return 200;
+        return OK;
 }
 
 int set_msg(int sockfd, int status_code, struct requestparams *rqp)
 {
         struct pageinfo pi;
         char *header = NULL;
+
         int in_fd = -1;
         struct stat sb;
 
-        if (status_code == 200)
+        int res = 0;
+
+        if (status_code == OK)
                 status_code = validate(rqp->path, &pi.filename);
 
         if (setpageinfo(status_code, &pi) != 0)
@@ -76,12 +80,25 @@ int set_msg(int sockfd, int status_code, struct requestparams *rqp)
 
         if ((in_fd = open(pi.filename, O_RDONLY)) == -1) {
                 syslog(LOG_WARNING, "Error in set_msg: open()");
-                free(pi.filename);
-                free(pi.status);
-                return set_msg(sockfd, 500, NULL);
+
+                // prevents potential code 500 loops
+                res = status_code != INTERNAL_SERVER_ERROR
+                    ? set_msg(sockfd, INTERNAL_SERVER_ERROR, NULL)
+                    : 1;
+
+                goto cleanup1;
         }
 
-        fstat(in_fd, &sb); // TODO: check om lyckas
+        if (fstat(in_fd, &sb) != 0) {
+                // log
+
+                // prevents potential code 500 loops
+                res = status_code != INTERNAL_SERVER_ERROR
+                    ? set_msg(sockfd, INTERNAL_SERVER_ERROR, NULL)
+                    : 1;
+
+                goto cleanup2;
+        }
 
         //time_t t = time(NULL);
         //struct tm tm = *localtime(&t);
@@ -113,30 +130,28 @@ int set_msg(int sockfd, int status_code, struct requestparams *rqp)
         // sendall
         if (send(sockfd, header, strlen(header), 0) == -1) {
                 syslog(LOG_WARNING, "Error in set_msg: send()");
-                close(in_fd);
-                free(header);
-                free(pi.filename);
-                free(pi.status);
-                return -1;
+                res = 1;
+                goto cleanup3;
         }
 
         //off_t offset = 0;
         if (!(strcmp(rqp->method, "HEAD") == 0)) {
                 if (sendfile(sockfd, in_fd, 0, sb.st_size) == -1) {
                         syslog(LOG_WARNING, "Error in set_msg: sendfile()");
-                        close(in_fd);
-                        free(header);
-                        free(pi.filename);
-                        free(pi.status);
-                        return -1;
+                        res = 1;
+                        goto cleanup3;
                 }
         }
 
-        close(in_fd);
+cleanup3:
         free(header);
+cleanup2:
+        close(in_fd);
+cleanup1:
         free(pi.filename);
         free(pi.status);
-        return 0;
+
+        return res;
 }
 
 int accept_request(int sockfd)
@@ -144,6 +159,7 @@ int accept_request(int sockfd)
         char buf[BUFLEN];
         char *token = NULL;
 
+        // referens?
         if (recv_all(sockfd, buf, BUFLEN-1, 0) != 0) {
                 //DIE("recvall");
         }
@@ -159,6 +175,8 @@ int accept_request(int sockfd)
                 rqp.method = strdup(token);
                 token = strtok(NULL, " ");
                 rqp.path = strdup(token);
+
+                // den andra recv skulle i så fall vara här
 
                 int rsp = set_msg(sockfd, 200, &rqp);
                 
