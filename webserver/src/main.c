@@ -64,7 +64,8 @@ void printall(char *ptr)
         printf("\n\n");
 }
 
-void logerror
+void logerror(void) {
+}
 
 void usage(void) {
 
@@ -78,7 +79,6 @@ int arghandler(int *argc, char **argv[], char **port, int *uselogf,
         int c;
         while ((c = getopt(*argc, *argv, ":hp:dl:s:")) != -1) {
 
-                 char *logpath = NULL;
                  long int pn;
 
                  switch (c) {
@@ -177,7 +177,7 @@ int main(int argc, char *argv[])
 	        close(STDERR_FILENO);
         }
 
-        // setuid? Till root om under 1024
+        // setuid?
 
         if (chdir(path) != 0)
                 DIE("chdir");
@@ -200,8 +200,6 @@ int main(int argc, char *argv[])
 
         if (port)
                 free(port);
-
-        // fram till hit pga SERVICE
 
         if ((sockfd = socket(res->ai_family, res->ai_socktype, 
             res->ai_protocol)) == -1)
