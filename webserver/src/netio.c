@@ -10,9 +10,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdint.h> // intmax_t
 
 #include "setpageinfo.h"
 #include "netio.h"
+
+#define LASTMODLEN 35
 
 int send_all(int sockfd, char *msg, size_t len, int flag)
 {
@@ -64,19 +67,23 @@ int validate(char *path, char **filename)
 
 int set_msg(int sockfd, int status_code, struct requestparams *rqp)
 {
+        int res = 0;
+
         struct pageinfo pi;
         char *header = NULL;
 
         int in_fd = -1;
         struct stat sb;
+        char last_modifed[LASTMODLEN];
 
-        int res = 0;
 
         if (status_code == OK)
                 status_code = validate(rqp->path, &pi.filename);
 
-        if (setpageinfo(status_code, &pi) != 0)
+        if (setpageinfo(status_code, &pi) != 0) {
                 fprintf(stderr, "setpageinfo: Not an error code! SNH-FL");
+                return 1;
+        }
 
         if ((in_fd = open(pi.filename, O_RDONLY)) == -1) {
                 syslog(LOG_WARNING, "Error in set_msg: open()");
@@ -100,19 +107,8 @@ int set_msg(int sockfd, int status_code, struct requestparams *rqp)
                 goto cleanup2;
         }
 
-        //time_t t = time(NULL);
-        //struct tm tm = *localtime(&t);
-
-        char *date = "September";
-
-
-        //  TODO: Last-Modifed.
-        /*
-        char date[20];
-        strftime(date, 20, "%d-%m-%y", localtime(&(sb.st_ctime)));
-
-        printf("date %s\n", date);
-        */
+        strftime(last_modifed, LASTMODLEN, "%a, %d %b %Y %H:%M:%S %Z%z",
+            localtime(&(sb.st_ctime)));
 
         /* TODO:  "implicit declaration of asprint"
         http://forums.devshed.com/programming-42/implicit-declaration-function-asprintf-283557.html
@@ -120,12 +116,10 @@ int set_msg(int sockfd, int status_code, struct requestparams *rqp)
         asprintf(&header,
             "HTTP/"HTTPVER" %s\r\n"
             "Content-Type: text/html; charset=UTF-8\r\n"
-            "Content-Length: %d\r\n"
-            "Date: %s\r\n"
+            "Content-Length: %jd\r\n"
+            "Last-Modified: %s\r\n"
             "Server: "SERVER"\r\n\r\n",
-            pi.status, sb.st_size, date);
-
-        // TODO: Fel formatkod för stat_buf.st_size.
+            pi.status, (intmax_t) sb.st_size, last_modifed);
 
         // sendall
         if (send(sockfd, header, strlen(header), 0) == -1) {
@@ -134,7 +128,6 @@ int set_msg(int sockfd, int status_code, struct requestparams *rqp)
                 goto cleanup3;
         }
 
-        //off_t offset = 0;
         if (!(strcmp(rqp->method, "HEAD") == 0)) {
                 if (sendfile(sockfd, in_fd, 0, sb.st_size) == -1) {
                         syslog(LOG_WARNING, "Error in set_msg: sendfile()");
@@ -151,6 +144,7 @@ cleanup1:
         free(pi.filename);
         free(pi.status);
 
+        // call logger
         return res;
 }
 
@@ -164,10 +158,8 @@ int accept_request(int sockfd)
                 //DIE("recvall");
         }
 
-        // en vanlig recv, sedan en recv all?
-
         if ((token = strtok(buf, " ")) == NULL)
-                return set_msg(sockfd, 400, NULL);
+                return set_msg(sockfd, BAD_REQUEST, NULL);
 
         if (strcmp(token, "GET") == 0|| strcmp(token, "HEAD") == 0) {
 
@@ -178,7 +170,7 @@ int accept_request(int sockfd)
 
                 // den andra recv skulle i så fall vara här
 
-                int rsp = set_msg(sockfd, 200, &rqp);
+                int rsp = set_msg(sockfd, OK, &rqp);
                 
                 free(rqp.method);
                 free(rqp.path);
@@ -186,9 +178,9 @@ int accept_request(int sockfd)
                 return rsp;
 
         } else if (strcmp(token, "POST") == 0) {
-                return set_msg(sockfd, 501, NULL);
+                return set_msg(sockfd, NOT_IMPLEMENTED, NULL);
         }
 
-        return set_msg(sockfd, 400, NULL);
+        return set_msg(sockfd, BAD_REQUEST, NULL);
 }
 
