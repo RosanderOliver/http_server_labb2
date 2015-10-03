@@ -132,6 +132,20 @@ int arghandler(int *argc, char **argv[], char **port, int *uselogf,
         return 0;
 }
 
+int log_function(FILE *logFile, int useLogFile, char **message) {
+
+	//If true prints both to logFile and syslog.
+	if (useLogFile==1) {
+			fseek(logFile, 0, SEEK_END);
+			fputs(*message, logFile);
+			syslog(LOG_ERR, *message);
+	} else {
+		syslog(LOG_ERR, *message);
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
         char *port = NULL, *path = NULL;
