@@ -12,6 +12,7 @@
 #include <time.h>
 #include <stdint.h> // intmax_t
 
+#include "logger.h"
 #include "setpageinfo.h"
 #include "netio.h"
 
@@ -47,140 +48,167 @@ int recv_all(int sockfd, char *buf, size_t len, int flag)
         return -1;
 }
 
-int validate(char *path, char **filename)
-{
-
-        // TODO: "URL validation"
-        // undersök om fil är utanför rot, ex /../../
-        // return 403
-
-        if (path == NULL)
-                return BAD_REQUEST;
-        else if (strcmp(path, "/") == 0) {
-                *filename = strdup("/index.html");
-                return OK;
-        } else if ((*filename = realpath(path, NULL)) == NULL)
-                return NOT_FOUND;
-
-        return OK;
-}
-
-int set_msg(int sockfd, int status_code, struct requestparams *rqp)
+int set_msg(int *status_code, char **txheader, int *in_fd, intmax_t *sz, char *path)
 {
         int res = 0;
 
         struct pageinfo pi;
-        char *header = NULL;
 
-        int in_fd = -1;
         struct stat sb;
         char last_modifed[LASTMODLEN];
 
+        if (path)
+                pi.filename = strdup(path);
 
-        if (status_code == OK)
-                status_code = validate(rqp->path, &pi.filename);
-
-        if (setpageinfo(status_code, &pi) != 0) {
+        if (setpageinfo(*status_code, &pi) != 0) {
                 fprintf(stderr, "setpageinfo: Not an error code! SNH-FL");
+                //res = 1;
+                //goto cleanup0;
                 return 1;
         }
 
-        if ((in_fd = open(pi.filename, O_RDONLY)) == -1) {
-                syslog(LOG_WARNING, "Error in set_msg: open()");
+        if ((*in_fd = open(pi.filename, O_RDONLY)) == -1) {
+                syslog(LOG_WARNING, " ");
 
-                // prevents potential code 500 loops
-                res = status_code != INTERNAL_SERVER_ERROR
-                    ? set_msg(sockfd, INTERNAL_SERVER_ERROR, NULL)
-                    : 1;
+                if (*status_code == INTERNAL_SERVER_ERROR) {
+                        res = 1;
+                } else {
+                        *status_code = INTERNAL_SERVER_ERROR;
+                        set_msg(status_code, txheader, in_fd, sz, NULL);
+                }   
 
-                goto cleanup1;
+                goto cleanup;
         }
 
-        if (fstat(in_fd, &sb) != 0) {
-                // log
+        if (fstat(*in_fd, &sb) != 0) {
+                syslog(LOG_WARNING, " ");
 
-                // prevents potential code 500 loops
-                res = status_code != INTERNAL_SERVER_ERROR
-                    ? set_msg(sockfd, INTERNAL_SERVER_ERROR, NULL)
-                    : 1;
+                if (*status_code == INTERNAL_SERVER_ERROR) {
+                        res = 1;
+                } else {
+                        *status_code = INTERNAL_SERVER_ERROR;
+                        set_msg(status_code, txheader, in_fd, sz, NULL);
+                }
 
-                goto cleanup2;
+                goto cleanup;
         }
 
-        strftime(last_modifed, LASTMODLEN, "%a, %d %b %Y %H:%M:%S %Z%z",
+        *sz = sb.st_size;
+
+        strftime(last_modifed, LASTMODLEN, "%a, %d %b %Y %H:%M:%S %Z",
             localtime(&(sb.st_ctime)));
 
-        /* TODO:  "implicit declaration of asprint"
-        http://forums.devshed.com/programming-42/implicit-declaration-function-asprintf-283557.html
-        */
-        asprintf(&header,
+        // warning implicit
+        asprintf(txheader,
             "HTTP/"HTTPVER" %s\r\n"
             "Content-Type: text/html; charset=UTF-8\r\n"
             "Content-Length: %jd\r\n"
             "Last-Modified: %s\r\n"
             "Server: "SERVER"\r\n\r\n",
-            pi.status, (intmax_t) sb.st_size, last_modifed);
+            pi.status, *sz, last_modifed);
 
-        // sendall
-        if (send(sockfd, header, strlen(header), 0) == -1) {
-                syslog(LOG_WARNING, "Error in set_msg: send()");
-                res = 1;
-                goto cleanup3;
-        }
+cleanup:
+        if (pi.filename)    free(pi.filename);
+        if (pi.status)      free(pi.status);
 
-        if (!(strcmp(rqp->method, "HEAD") == 0)) {
-                if (sendfile(sockfd, in_fd, 0, sb.st_size) == -1) {
-                        syslog(LOG_WARNING, "Error in set_msg: sendfile()");
-                        res = 1;
-                        goto cleanup3;
-                }
-        }
-
-cleanup3:
-        free(header);
-cleanup2:
-        close(in_fd);
-cleanup1:
-        free(pi.filename);
-        free(pi.status);
-
-        // call logger
         return res;
 }
 
-int accept_request(int sockfd)
+int interpret_header(char *rxheader, struct requestparams *rqp)
 {
-        char buf[BUFLEN];
         char *token = NULL;
 
-        // referens?
+        rqp->method = (token = strtok(rxheader, " ")) != NULL
+            ? strdup(token)
+            : NULL;
+
+        rqp->path = (token = strtok(NULL, " ")) != NULL
+            ? strdup(token)
+            : NULL;
+
+        rqp->httpver = (token = strtok(NULL, " ")) != NULL
+            ? strdup(token)
+            : NULL;
+
+        if (strcmp(rqp->method, "POST") == 0) {
+                return NOT_IMPLEMENTED;
+        } else if (!(strcmp(rqp->method, "GET") == 0 || 
+            strcmp(rqp->method, "HEAD") == 0)) {
+                return BAD_REQUEST;
+        }
+
+        /*
+         * TODO: "URL validation"
+         * undersök om fil är utanför rot, ex /../../
+         * return 403
+        */
+
+        if (rqp->path == NULL)
+                return BAD_REQUEST;
+        else if (strcmp(rqp->path, "/") == 0)
+                rqp->path = strdup("/index.html");
+        else if ((rqp->path = realpath(rqp->path, NULL)) == NULL)
+                return NOT_FOUND;
+
+        // TODO: Tolka HTTP version
+
+        return OK; 
+}
+
+int serve(int sockfd, struct loginfo *li)
+{
+        int res = 0;
+
+        struct requestparams rqp;
+
+        char buf[BUFLEN];
+        int status_code;
+
+        char *txheader = NULL;
+        int in_fd = -1;
+
+        intmax_t sz = 0;
+
         if (recv_all(sockfd, buf, BUFLEN-1, 0) != 0) {
-                //DIE("recvall");
+                syslog(LOG_WARNING, " ");
+                return 1;
         }
 
-        if ((token = strtok(buf, " ")) == NULL)
-                return set_msg(sockfd, BAD_REQUEST, NULL);
+        status_code = interpret_header(buf, &rqp);
 
-        if (strcmp(token, "GET") == 0|| strcmp(token, "HEAD") == 0) {
+        // recv igen?
 
-                struct requestparams rqp;
-                rqp.method = strdup(token);
-                token = strtok(NULL, " ");
-                rqp.path = strdup(token);
-
-                // den andra recv skulle i så fall vara här
-
-                int rsp = set_msg(sockfd, OK, &rqp);
-                
-                free(rqp.method);
-                free(rqp.path);
-
-                return rsp;
-
-        } else if (strcmp(token, "POST") == 0) {
-                return set_msg(sockfd, NOT_IMPLEMENTED, NULL);
+        if (set_msg(&status_code, &txheader, &in_fd, &sz, rqp.path) != 0) {
+                syslog(LOG_WARNING, " ");
+                res = 1;
+                goto cleanup;
         }
 
-        return set_msg(sockfd, BAD_REQUEST, NULL);
+        // sendall
+        if (send(sockfd, txheader, strlen(txheader), 0) == -1) {
+                syslog(LOG_WARNING, " ");
+                res = 1;
+                goto cleanup;
+        }
+
+        if (strcmp(rqp.method, "HEAD") != 0) {
+                if (sendfile(sockfd, in_fd, 0, sz) == -1) {
+                        syslog(LOG_WARNING, " ");
+                        res = 1;
+                }
+        }
+
+        li->header = strdup(buf);
+        li->sz = sz;
+        li->code = status_code;
+
+cleanup:
+        if (rqp.method)  free(rqp.method);
+        if (rqp.path)    free(rqp.path);
+        if (rqp.httpver) free(rqp.httpver);
+        if (txheader)    free(txheader);
+        close(in_fd);
+
+        return res;
 }
 

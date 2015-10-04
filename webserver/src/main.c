@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include "logger.h"
 #include "configparser.h"
 #include "netio.h"
 
@@ -132,10 +133,10 @@ int arghandler(int *argc, char **argv[], char **port, int *uselogf,
         return 0;
 }
 
-int log_function(FILE *logFile, int useLogFile, char **message) {
+int log_function(FILE *logFile, int uselogf, char **message) {
 
 	//If true prints both to logFile and syslog.
-	if (useLogFile==1) {
+	if (uselogf) {
 			fseek(logFile, 0, SEEK_END);
 			fputs(*message, logFile);
 			syslog(LOG_ERR, *message);
@@ -175,6 +176,13 @@ int main(int argc, char *argv[])
 	openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 
         // TODO: Egen funktion demonize?
+
+        /*
+        * "When directing output to a logfile, it is best to open 
+        * the file before closing stderr to ensure that the daemon 
+        * is not left with no means of reporting errors."
+        */
+
         if (runasd) {
 	        if ((pid=fork()) < 0)
 	                exit(EXIT_FAILURE);
@@ -199,7 +207,7 @@ int main(int argc, char *argv[])
         if (path)
                 free(path);
 
-        if (chroot("./") != 0)
+        if (chroot("./") != 0) // en chroot i demonize, sen en för path?
                 DIE("chroot");
         
         memset(&hints, 0, sizeof(hints));
@@ -229,6 +237,8 @@ int main(int argc, char *argv[])
                 DIE("listen");
         }
 
+
+        // Kan kanske göras i argumenthanteraren.
         if (uselogf)
                 fseek(logfile, 0, SEEK_END); //Sätter filpekaren till slutet av filen pga fork()?
 
@@ -241,16 +251,32 @@ int main(int argc, char *argv[])
                 }
 
                 // TODO: Ta bort om det inte behövs i loggningen.
-                inet_ntop(their_addr.ss_family, 
-                    get_in_addr((struct sockaddr *) &their_addr), s, sizeof(s));
+                
+
+                //printf("Server: got connection from %s\n", s);
 	
                 if ((pid = fork()) == -1) {
                         syslog(LOG_ERR, "fork() error in request handling");
-                        set_msg(new_fd, 500, NULL);
+                        // set_msg(new_fd, 500, NULL);
                 } else if (pid == 0) {
                         close(sockfd);
                         freeaddrinfo(res);
-                        accept_request(new_fd);
+
+                        struct loginfo li;
+
+                        inet_ntop(their_addr.ss_family, 
+                            get_in_addr((struct sockaddr *) &their_addr), 
+                            s, sizeof(s));
+
+                        li.ipaddr = strdup(s);
+
+                        if (serve(new_fd, &li) != 0) {
+                                // cleanup
+                                exit(EXIT_FAILURE);
+                        }
+
+                        // call logger
+
                         close(new_fd);
                         exit(EXIT_SUCCESS);
                 }

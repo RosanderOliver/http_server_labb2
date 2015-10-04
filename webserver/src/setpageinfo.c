@@ -7,7 +7,7 @@ int setpageinfo(int status_code, struct pageinfo *pi)
 {
         switch(status_code) {
         case 500:
-                pi->filename = strdup("500_internal_server_error.html");
+                pi->filename = strdup("500_internal_server_error.html"); // ska kanske i textform
                 pi->status = strdup("500 Internal Server Error");
                 break;
         case 200:
