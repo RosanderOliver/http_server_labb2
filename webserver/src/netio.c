@@ -18,6 +18,18 @@
 
 #define LASTMODLEN 35
 
+void printall(char *ptr)
+{
+        char *p = ptr;
+        int k = 0;
+        while (*p != '\0') {
+                printf("%02d: %03d %c\n", k, *p, *p);
+                p++;
+                k++;
+        }
+        printf("\n\n");
+}
+
 int send_all(int sockfd, char *msg, size_t len, int flag)
 {
         char *ptr = msg;
@@ -29,22 +41,6 @@ int send_all(int sockfd, char *msg, size_t len, int flag)
                 len -= sent;
         }
         // error buffer full
-        return -1;
-}
-
-int recv_all(int sockfd, char *buf, size_t len, int flag)
-{
-        char *ptr = buf;
-        int rx = 0;
-        while (len > 0) {
-                if (len < BUFLEN-5 && strncmp(ptr-4, "\r\n\r\n", 4) == 0)
-                        return 0;
-                if ((rx = recv(sockfd, ptr, len, 0)) == -1)
-                        return -1;
-                ptr += rx;
-                len -= rx;
-        }
-        // set error msg buffer full
         return -1;
 }
 
@@ -145,7 +141,7 @@ int interpret_header(char *rxheader, struct requestparams *rqp)
 
         if (rqp->path == NULL)
                 return BAD_REQUEST;
-        else if (strcmp(rqp->path, "/") == 0)
+        else if (strcmp(rqp->path, "/") == 0) 
                 rqp->path = strdup("/index.html");
         else if ((rqp->path = realpath(rqp->path, NULL)) == NULL)
                 return NOT_FOUND;
@@ -155,28 +151,71 @@ int interpret_header(char *rxheader, struct requestparams *rqp)
         return OK; 
 }
 
+
+
+int recv_all(int sockfd, char *buf, size_t len, int flag, part pt)
+{
+
+        char *ptr = buf;
+        int rx = 0;
+
+        char *apa = pt == STATUS_LINE ? "\r\n" : "\r\n\r\n";
+
+        int overflow = 0;
+        int recvend = 0;
+
+        while (!overflow && !recvend) {
+                if ((rx = recv(sockfd, ptr, len, 0)) == -1)
+                        return -1;
+
+                if ((len -= rx) < 0) {
+                        overflow = 1;
+                } else {
+                        ptr += rx;
+                        *ptr = '\0';
+                        if (strstr(buf, apa) != NULL || strcmp(buf, "\r\n") == 0)
+                                recvend = 1;
+                }
+        }
+        // set error msg buffer full
+
+        return overflow;
+}
+
+
+
 int serve(int sockfd, struct loginfo *li)
 {
         int res = 0;
 
         struct requestparams rqp;
 
-        char buf[BUFLEN];
+        char status_line[BUFLEN];
+        char header[BUFLEN];
+        part pt;
+
         int status_code;
 
         char *txheader = NULL;
         int in_fd = -1;
-
         intmax_t sz = 0;
 
-        if (recv_all(sockfd, buf, BUFLEN-1, 0) != 0) {
+        pt = STATUS_LINE;
+        if (recv_all(sockfd, status_line, BUFLEN - 1, 0, pt) != 0) {
                 syslog(LOG_WARNING, " ");
                 return 1;
         }
 
-        status_code = interpret_header(buf, &rqp);
+        li->header = strdup(status_line);
+        status_code = interpret_header(status_line, &rqp);
 
-        // recv igen?
+        if (status_code != BAD_REQUEST) {
+                pt = HEADER;
+                if (recv_all(sockfd, header, BUFLEN - 1, 0, pt) != 0) {
+                        syslog(LOG_WARNING, " ");
+                        return 1;
+                }
+        }
 
         if (set_msg(&status_code, &txheader, &in_fd, &sz, rqp.path) != 0) {
                 syslog(LOG_WARNING, " ");
@@ -198,7 +237,6 @@ int serve(int sockfd, struct loginfo *li)
                 }
         }
 
-        li->header = strdup(buf);
         li->sz = sz;
         li->code = status_code;
 

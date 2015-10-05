@@ -17,7 +17,6 @@ int configparser(char **port, handling_type *handling, char **path) {
         size_t len = 0;
         ssize_t read = -1;
 
-
         // TODO: Klara av ~ (tilde) i sökvägen.
         if ((fp = fopen(CONFPATH, "r")) == NULL) {
                 perror("open");

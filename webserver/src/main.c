@@ -50,22 +50,8 @@ void handle_sigchld(int sig)
 -1 innebär att den väntar på alla pids, WNOHANG sätter inte processen i 
 väntan. waitpid() returnerar 0 om ingen blivit terminerad. 
 */
-	while(waitpid(-1, 0, WNOHANG) > 0) {
+        while(waitpid(-1, 0, WNOHANG) > 0) {
         }
-}
-
-// debugfunktion
-void printall(char *ptr)
-{
-        char *p = ptr;
-        while (*p != '\0') {
-                printf("%03d %c\n", *p, *p);
-                p++;
-        }
-        printf("\n\n");
-}
-
-void logerror(void) {
 }
 
 void usage(void) {
@@ -74,8 +60,8 @@ void usage(void) {
 
 }
 
-int arghandler(int *argc, char **argv[], char **port, int *uselogf, 
-    FILE **logfile, int *runasd, handling_type *handling)
+int arghandler(int *argc, char **argv[], char **port, int *runasd, 
+    handling_type *handling)
 {
         int c;
         while ((c = getopt(*argc, *argv, ":hp:dl:s:")) != -1) {
@@ -99,9 +85,12 @@ int arghandler(int *argc, char **argv[], char **port, int *uselogf,
                          *runasd = 1;
                          break;
                  case 'l':
-                         if ((*logfile = fopen(optarg, "a+")) == NULL)
-                                 DIE("fopen");
-                         *uselogf = 1;
+                         {
+                                 char *a = optarg;
+                                 uselogf = 1;
+                                 actlog_path = "/home/vph/http_server_labb2/webserver/loggen.log"; // strdup
+                                 errlog_path = "/home/vph/http_server_labb2/webserver/loggen.err"; // strdup
+                         }
                          break;
                  case 's':
                          if (strcmp(optarg, "fork") == 0) {
@@ -133,18 +122,23 @@ int arghandler(int *argc, char **argv[], char **port, int *uselogf,
         return 0;
 }
 
-int log_function(FILE *logFile, int uselogf, char **message) {
+void demonize()
+{
+        pid_t pid;
 
-	//If true prints both to logFile and syslog.
-	if (uselogf) {
-			fseek(logFile, 0, SEEK_END);
-			fputs(*message, logFile);
-			syslog(LOG_ERR, *message);
-	} else {
-		syslog(LOG_ERR, *message);
-	}
+        if ((pid=fork()) < 0)
+                exit(EXIT_FAILURE);
+        else if (pid > 0)
+                exit(EXIT_SUCCESS);
 
-	return 0;
+        umask(0);
+
+        if (setsid() < 0)
+                exit(EXIT_FAILURE);
+
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
 }
 
 int main(int argc, char *argv[])
@@ -152,16 +146,17 @@ int main(int argc, char *argv[])
         char *port = NULL, *path = NULL;
         handling_type handling;
 
-        int runasd = 0, uselogf = 0;
-        FILE *logfile = NULL;
+        int runasd = 0;
 
-	pid_t pid;
-	struct sockaddr_storage their_addr;
-        socklen_t addr_size;
+        int sockfd = -1, new_fd = -1;
+
         struct addrinfo hints, *res;
-        int sockfd, new_fd, status;
         char s[INET6_ADDRSTRLEN];
-
+        
+        pid_t pid;
+        struct sockaddr_storage their_addr;
+        socklen_t addr_size;
+  
         // TODO: Gör felmeddelandena kompatibla med perror()?
 
         if (configparser(&port, &handling, &path) != 0)
@@ -169,35 +164,17 @@ int main(int argc, char *argv[])
 
         printf("port %s\n", port);
 
-        if (arghandler(&argc, &argv, &port, &uselogf, &logfile, &runasd,
-            &handling) != 0)
+        if (arghandler(&argc, &argv, &port, &runasd, &handling) != 0)
                 DIE("arghandler");
 
-	openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
-
-        // TODO: Egen funktion demonize?
-
-        /*
-        * "When directing output to a logfile, it is best to open 
-        * the file before closing stderr to ensure that the daemon 
-        * is not left with no means of reporting errors."
-        */
+        openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 
         if (runasd) {
-	        if ((pid=fork()) < 0)
-	                exit(EXIT_FAILURE);
-	        else if (pid > 0)
-	                exit(EXIT_SUCCESS);
-
-	        umask(0);
-
-	        if (setsid() < 0)
-	                exit(EXIT_FAILURE);
-
-	        close(STDIN_FILENO);
-	        close(STDOUT_FILENO);
-	        close(STDERR_FILENO);
+                printf("Starting daemon...\n");
+                demonize();
         }
+
+
 
         // setuid?
 
@@ -215,6 +192,7 @@ int main(int argc, char *argv[])
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_flags = AI_PASSIVE;
 
+        int status;
         if ((status = getaddrinfo(NULL, port, &hints, &res)) != 0) {
                 herror(gai_strerror(status));
                 exit(EXIT_FAILURE);
@@ -237,12 +215,12 @@ int main(int argc, char *argv[])
                 DIE("listen");
         }
 
-
         // Kan kanske göras i argumenthanteraren.
-        if (uselogf)
-                fseek(logfile, 0, SEEK_END); //Sätter filpekaren till slutet av filen pga fork()?
+        //if (uselogf)
+        //        fseek(logfile, 0, SEEK_END); //Sätter filpekaren till slutet av filen pga fork()?
 
         while(1) {
+
                 addr_size = sizeof(their_addr);    
                 if ((new_fd = accept(sockfd, (struct sockaddr *) &their_addr, 
                     &addr_size)) == -1) {
@@ -250,11 +228,6 @@ int main(int argc, char *argv[])
                         continue;
                 }
 
-                // TODO: Ta bort om det inte behövs i loggningen.
-                
-
-                //printf("Server: got connection from %s\n", s);
-	
                 if ((pid = fork()) == -1) {
                         syslog(LOG_ERR, "fork() error in request handling");
                         // set_msg(new_fd, 500, NULL);
@@ -275,23 +248,26 @@ int main(int argc, char *argv[])
                                 exit(EXIT_FAILURE);
                         }
 
-                        // call logger
+                        log_act(&li);
+
+                        free(li.ipaddr);
+                        free(li.header);
 
                         close(new_fd);
                         exit(EXIT_SUCCESS);
                 }
                 close(new_fd);
 
-		if (signal(SIGCHLD, SIG_IGN) == SIG_ERR){
-			syslog(LOG_ERR, "SIG_ERR in request handling");
-			exit(EXIT_FAILURE);
-		}
+                if (signal(SIGCHLD, SIG_IGN) == SIG_ERR){
+                        syslog(LOG_ERR, "SIG_ERR in request handling");
+                        exit(EXIT_FAILURE);
+                }
 
         }
 
         freeaddrinfo(res);
         close(sockfd);
-	closelog();
-	fclose(logfile);
+        closelog();
+        //fclose(logfile);
         return 0;
 }
