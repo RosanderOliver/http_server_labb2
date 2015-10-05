@@ -19,3 +19,7 @@ Stilguide: [Linux kernel coding style](https://www.kernel.org/doc/Documentation/
 ### Länkar ang. loggning:
 
 [**Man7** - Manual for syslog(3)](http://man7.org/linux/man-pages/man3/syslog.3.html)
+
+### Länkar ang. jail:
+
+[Best Practices for UNIX chroot() Operation](http://www.unixwiz.net/techtips/chroot-practices.html)
