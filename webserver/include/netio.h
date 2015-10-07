@@ -21,11 +21,18 @@ struct requestparams {
         char *httpver;
 };
 
+struct response {
+        int stsc;
+        char *tx_stsl;
+        int in_fd;
+        intmax_t sz; 
+};
+
 int send_all(int sockfd, char *msg, size_t len, int flag);
 int recv_all(int sockfd, char *buf, size_t len, int flag, part pt);
 
-int interpret_header(char *rxheader, struct requestparams *rqp);
-int set_msg(int *status_code, char **txheader, int *in_fd, intmax_t *sz, char *path);
+int interpret_stsl(char *rxheader, struct requestparams *rqp);
+int set_msg(struct response *rsp, char *path);
 int serve(int sockfd, struct loginfo *li);
 
 #endif

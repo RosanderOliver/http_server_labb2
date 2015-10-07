@@ -16,7 +16,11 @@
 #include "setpageinfo.h"
 #include "netio.h"
 
+#include <errno.h> // test 
+
 #define LASTMODLEN 35
+
+// global errno?
 
 void printall(char *ptr)
 {
@@ -44,7 +48,7 @@ int send_all(int sockfd, char *msg, size_t len, int flag)
         return -1;
 }
 
-int set_msg(int *status_code, char **txheader, int *in_fd, intmax_t *sz, char *path)
+int set_msg(struct response *rsp, char *path)
 {
         int res = 0;
 
@@ -56,52 +60,52 @@ int set_msg(int *status_code, char **txheader, int *in_fd, intmax_t *sz, char *p
         if (path)
                 pi.filename = strdup(path);
 
-        if (setpageinfo(*status_code, &pi) != 0) {
+        if (setpageinfo(rsp->stsc, &pi) != 0) {
                 fprintf(stderr, "setpageinfo: Not an error code! SNH-FL");
                 //res = 1;
                 //goto cleanup0;
                 return 1;
         }
 
-        if ((*in_fd = open(pi.filename, O_RDONLY)) == -1) {
+        if ((rsp->in_fd = open(pi.filename, O_RDONLY)) == -1) {
                 syslog(LOG_WARNING, " ");
 
-                if (*status_code == INTERNAL_SERVER_ERROR) {
+                if (rsp->stsc == INTERNAL_SERVER_ERROR) {
                         res = 1;
                 } else {
-                        *status_code = INTERNAL_SERVER_ERROR;
-                        set_msg(status_code, txheader, in_fd, sz, NULL);
+                        rsp->stsc = INTERNAL_SERVER_ERROR;
+                        set_msg(rsp, NULL);
                 }   
 
                 goto cleanup;
         }
 
-        if (fstat(*in_fd, &sb) != 0) {
+        if (fstat(rsp->in_fd, &sb) != 0) {
                 syslog(LOG_WARNING, " ");
 
-                if (*status_code == INTERNAL_SERVER_ERROR) {
+                if (rsp->stsc == INTERNAL_SERVER_ERROR) {
                         res = 1;
                 } else {
-                        *status_code = INTERNAL_SERVER_ERROR;
-                        set_msg(status_code, txheader, in_fd, sz, NULL);
+                        rsp->stsc = INTERNAL_SERVER_ERROR;
+                        set_msg(rsp, NULL);
                 }
 
                 goto cleanup;
         }
 
-        *sz = sb.st_size;
+        rsp->sz = sb.st_size;
 
         strftime(last_modifed, LASTMODLEN, "%a, %d %b %Y %H:%M:%S %Z",
             localtime(&(sb.st_ctime)));
 
         // warning implicit
-        asprintf(txheader,
+        asprintf(&rsp->tx_stsl,
             "HTTP/"HTTPVER" %s\r\n"
             "Content-Type: text/html; charset=UTF-8\r\n"
             "Content-Length: %jd\r\n"
             "Last-Modified: %s\r\n"
             "Server: "SERVER"\r\n\r\n",
-            pi.status, *sz, last_modifed);
+            pi.status, rsp->sz, last_modifed);
 
 cleanup:
         if (pi.filename)    free(pi.filename);
@@ -110,7 +114,7 @@ cleanup:
         return res;
 }
 
-int interpret_header(char *rxheader, struct requestparams *rqp)
+int interpret_stsl(char *rxheader, struct requestparams *rqp)
 {
         char *token = NULL;
 
@@ -151,8 +155,6 @@ int interpret_header(char *rxheader, struct requestparams *rqp)
         return OK; 
 }
 
-
-
 int recv_all(int sockfd, char *buf, size_t len, int flag, part pt)
 {
 
@@ -168,13 +170,11 @@ int recv_all(int sockfd, char *buf, size_t len, int flag, part pt)
                 if ((rx = recv(sockfd, ptr, len, 0)) == -1)
                         return -1;
 
-                if ((len -= rx) < 0) {
-                        overflow = 1;
-                } else {
+                if (!(overflow = (len -= rx) < 0)) {
                         ptr += rx;
                         *ptr = '\0';
-                        if (strstr(buf, apa) != NULL || strcmp(buf, "\r\n") == 0)
-                                recvend = 1;
+                        recvend = strstr(buf, apa) != NULL 
+                            || strcmp(buf, "\r\n") == 0;
                 }
         }
         // set error msg buffer full
@@ -182,70 +182,82 @@ int recv_all(int sockfd, char *buf, size_t len, int flag, part pt)
         return overflow;
 }
 
-
-
 int serve(int sockfd, struct loginfo *li)
 {
         int res = 0;
 
-        struct requestparams rqp;
-
-        char status_line[BUFLEN];
-        char header[BUFLEN];
+        char buf[BUFLEN];
         part pt;
 
-        int status_code;
+        char *ptr = NULL;
+        int all_in_one = 0;
 
-        char *txheader = NULL;
-        int in_fd = -1;
-        intmax_t sz = 0;
+        char *stsl = NULL;
+        char *header = NULL;
+
+        struct requestparams rqp;
+
+        struct response rsp;
 
         pt = STATUS_LINE;
-        if (recv_all(sockfd, status_line, BUFLEN - 1, 0, pt) != 0) {
+        if (recv_all(sockfd, buf, BUFLEN - 1, 0, pt) != 0) {
                 syslog(LOG_WARNING, " ");
                 return 1;
         }
 
-        li->header = strdup(status_line);
-        status_code = interpret_header(status_line, &rqp);
-
-        if (status_code != BAD_REQUEST) {
-                pt = HEADER;
-                if (recv_all(sockfd, header, BUFLEN - 1, 0, pt) != 0) {
-                        syslog(LOG_WARNING, " ");
-                        return 1;
+        if ((ptr = strstr(buf, "\r\n")) != NULL) {
+                if (strstr(ptr, "\r\n\r\n") != NULL) {
+                        all_in_one = 1;
+                        header = strdup(ptr + 2);
                 }
+                *ptr = '\0';
+                stsl = strdup(buf);
+                li->status_line = strdup(stsl);
         }
 
-        if (set_msg(&status_code, &txheader, &in_fd, &sz, rqp.path) != 0) {
+        rsp.stsc = interpret_stsl(stsl, &rqp);
+
+        if (!all_in_one && rsp.stsc != BAD_REQUEST) {
+                pt = HEADER;
+                if (recv_all(sockfd, buf, BUFLEN - 1, 0, pt) != 0) {
+                        log_err("recv_all()", strerror(errno), NULL, LOG_CRIT);
+                        res = 1;
+                        goto cleanup;
+                }
+                header = strdup(buf);
+        }
+
+        if (set_msg(&rsp, rqp.path) != 0) {
                 syslog(LOG_WARNING, " ");
                 res = 1;
                 goto cleanup;
         }
 
         // sendall
-        if (send(sockfd, txheader, strlen(txheader), 0) == -1) {
+        if (send(sockfd, rsp.tx_stsl, strlen(rsp.tx_stsl), 0) == -1) {
                 syslog(LOG_WARNING, " ");
                 res = 1;
                 goto cleanup;
         }
 
         if (strcmp(rqp.method, "HEAD") != 0) {
-                if (sendfile(sockfd, in_fd, 0, sz) == -1) {
+                if (sendfile(sockfd, rsp.in_fd, 0, rsp.sz) == -1) {
                         syslog(LOG_WARNING, " ");
                         res = 1;
                 }
         }
 
-        li->sz = sz;
-        li->code = status_code;
+        li->sz = rsp.sz;
+        li->code = rsp.stsc;
 
 cleanup:
-        if (rqp.method)  free(rqp.method);
-        if (rqp.path)    free(rqp.path);
-        if (rqp.httpver) free(rqp.httpver);
-        if (txheader)    free(txheader);
-        close(in_fd);
+        if (stsl)         free(stsl);
+        if (header)       free(header);
+        if (rqp.method)   free(rqp.method);
+        if (rqp.path)     free(rqp.path);
+        if (rqp.httpver)  free(rqp.httpver);
+        if (rsp.tx_stsl)  free(rsp.tx_stsl);
+        close(rsp.in_fd);
 
         return res;
 }

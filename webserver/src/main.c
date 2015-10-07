@@ -28,6 +28,8 @@
 #include "configparser.h"
 #include "netio.h"
 
+#include <errno.h> // test 
+
 #define SERVICE "3490"
 #define BACKLOG 10
 
@@ -86,10 +88,19 @@ int arghandler(int *argc, char **argv[], char **port, int *runasd,
                          break;
                  case 'l':
                          {
-                                 char *a = optarg;
                                  uselogf = 1;
-                                 actlog_path = "/home/vph/http_server_labb2/webserver/loggen.log"; // strdup
-                                 errlog_path = "/home/vph/http_server_labb2/webserver/loggen.err"; // strdup
+                                 if ((actlog = fopen(optarg, "a+")) == NULL)
+                                         DIE("fopen");
+
+                                 char *fn = malloc(strlen(optarg + 5));
+                                 sprintf(fn, "%s.err", optarg);
+
+                                 if ((errlog = fopen(fn, "a+")) == NULL) {
+                                         free(fn);
+                                         DIE("fopen");
+                                 }
+
+                                 free(fn);
                          }
                          break;
                  case 's':
@@ -146,6 +157,7 @@ int main(int argc, char *argv[])
         char *port = NULL, *path = NULL;
         handling_type handling;
 
+        uselogf = 0;
         int runasd = 0;
 
         int sockfd = -1, new_fd = -1;
@@ -156,8 +168,6 @@ int main(int argc, char *argv[])
         pid_t pid;
         struct sockaddr_storage their_addr;
         socklen_t addr_size;
-  
-        // TODO: Gör felmeddelandena kompatibla med perror()?
 
         if (configparser(&port, &handling, &path) != 0)
                 DIE("arghandler");
@@ -167,16 +177,14 @@ int main(int argc, char *argv[])
         if (arghandler(&argc, &argv, &port, &runasd, &handling) != 0)
                 DIE("arghandler");
 
-        openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
+        //openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 
         if (runasd) {
                 printf("Starting daemon...\n");
                 demonize();
         }
 
-
-
-        // setuid?
+        // TODO: setuid?
 
         if (chdir(path) != 0)
                 DIE("chdir");
@@ -229,8 +237,8 @@ int main(int argc, char *argv[])
                 }
 
                 if ((pid = fork()) == -1) {
+                        //log_err("monster", LOG_CRIT);
                         syslog(LOG_ERR, "fork() error in request handling");
-                        // set_msg(new_fd, 500, NULL);
                 } else if (pid == 0) {
                         close(sockfd);
                         freeaddrinfo(res);
@@ -250,9 +258,12 @@ int main(int argc, char *argv[])
 
                         log_act(&li);
 
-                        free(li.ipaddr);
-                        free(li.header);
+                        if (li.ipaddr)        free(li.ipaddr);
+                        if (li.status_line) free(li.status_line);
 
+                        fclose(errlog);
+                        fclose(actlog);
+                        closelog();
                         close(new_fd);
                         exit(EXIT_SUCCESS);
                 }
