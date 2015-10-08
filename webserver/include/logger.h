@@ -20,7 +20,6 @@ struct loginfo {
 };
 
 void log_act(struct loginfo *li);
-// struct: errmsg, param
 void log_err(char *src, char *errmsg, char *errparam, int priority);
 
 #endif

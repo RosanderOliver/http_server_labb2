@@ -2,12 +2,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-// isspace, isblank
 #include <ctype.h>
 
-
 #include "configparser.h"
+
+#define CONFPATH "/home/vph/http_server_labb2/webserver/src/.lab3-config"
+#define MINPORT 0
+#define MAXPORT 65535
 
 int configparser(char **port, handling_type *handling, char **path) {
 
@@ -17,16 +18,11 @@ int configparser(char **port, handling_type *handling, char **path) {
         size_t len = 0;
         ssize_t read = -1;
 
-        // TODO: Klara av ~ (tilde) i sökvägen.
-        if ((fp = fopen(CONFPATH, "r")) == NULL) {
-                perror("open");
+        if ((fp = fopen(CONFPATH, "r")) == NULL)
                 return 1;
-        }
         
         while ((read = getline(&line, &len, fp)) != -1) {
 
-                // for free to work line must point to the first location,
-                // therefore we use another pointer for manipulation
                 char *start = line;
 
                 while (isblank(*start))
@@ -35,7 +31,6 @@ int configparser(char **port, handling_type *handling, char **path) {
                 if (*start == '\n')
                         continue;
 
-                // removes trailing white-space, including newline
                 char *end = start + strlen(start) - 1;
                 while(end > start && isspace(*end)) 
                         end--;
@@ -45,24 +40,24 @@ int configparser(char **port, handling_type *handling, char **path) {
                 
                 if ((optval = strchr(start, ' ')) != NULL)
                         *optval = '\0';
-                ++optval;          
+                optval++;          
 
                 if (strcmp(start, "path") == 0) {
                         while (isspace(*optval))
                                 ++optval;
                         optval = strtok(optval, "\"");
                         if ((*path = realpath(optval, NULL)) == NULL) {
-                                perror("realpath");
                                 return 1;
                         }
                 } else if (strcmp(start, "port") == 0) {
                         while (isspace(*optval))
                                 ++optval;
-                        long int r;
-                        if ((r = strtol(optval, NULL, 10)) > 1024 && r < 6400) {
+                        long int pn;
+                        if ((pn = strtol(optval, NULL, 10)) >= MINPORT &&
+                            pn <= MAXPORT) {
                                  *port = strdup(optval);
                         } else {
-                                 fprintf(stderr, "Invalid port!\n");
+                                 fprintf(stderr, "Invalid port number!\n");
                                  return 1;
                         }
                                 
@@ -87,6 +82,7 @@ int configparser(char **port, handling_type *handling, char **path) {
         }
 
         fclose(fp);
-        if (line) free(line);
+        if (line)
+                free(line);
         return 0;
 }

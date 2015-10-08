@@ -24,6 +24,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+// wordexp
+#include <wordexp.h>
+
 #include "logger.h"
 #include "configparser.h"
 #include "netio.h"
@@ -48,10 +51,6 @@ void *get_in_addr(struct sockaddr *sa)
 
 void handle_sigchld(int sig)
 {
-/*
--1 innebär att den väntar på alla pids, WNOHANG sätter inte processen i 
-väntan. waitpid() returnerar 0 om ingen blivit terminerad. 
-*/
         while(waitpid(-1, 0, WNOHANG) > 0) {
         }
 }
@@ -71,15 +70,22 @@ int arghandler(int *argc, char **argv[], char **port, int *runasd,
                  long int pn;
 
                  switch (c) {
+
                  case 'h':
                          usage();
                          return 1;
                  case 'p':
-                         if ((pn = strtol(optarg, NULL, 10)) > 1024 
-                             && pn < 6400) {
+                         if (optarg[0] == '-') {
+                                 fprintf (stderr, 
+                                     "Option -%c requires an argument.\n", 
+                                      optopt);
+                                 return 1;
+                         }
+                         if ((pn = strtol(optarg, NULL, 10)) > 0) {
                                  *port = optarg;
                          } else {
-                                 fprintf(stderr, "Invalid port!\n");
+                                 fprintf(stderr, "Invalid port \"%s\"!\n", 
+                                     optarg);
                                  exit(EXIT_FAILURE);
                          }
                          break;
@@ -87,8 +93,15 @@ int arghandler(int *argc, char **argv[], char **port, int *runasd,
                          *runasd = 1;
                          break;
                  case 'l':
+                         if (optarg[0] == '-') {
+                                 fprintf (stderr, 
+                                     "Option -%c requires an argument.\n", 
+                                      optopt);
+                                 return 1;
+                         }
                          {
                                  uselogf = 1;
+
                                  if ((actlog = fopen(optarg, "a+")) == NULL)
                                          DIE("fopen");
 
@@ -96,14 +109,23 @@ int arghandler(int *argc, char **argv[], char **port, int *runasd,
                                  sprintf(fn, "%s.err", optarg);
 
                                  if ((errlog = fopen(fn, "a+")) == NULL) {
-                                         free(fn);
+                                         if (fn)
+                                                 free(fn);
                                          DIE("fopen");
                                  }
 
-                                 free(fn);
+                                 if (fn)
+                                         free(fn);
                          }
                          break;
                  case 's':
+                         if (optarg[0] == '-') {
+                                 fprintf (stderr, 
+                                     "Option -%c requires an argument.\n", 
+                                      optopt);
+                                 return 1;
+                         }
+
                          if (strcmp(optarg, "fork") == 0) {
                                  *handling = FORK;
                          } else if (strcmp(optarg, "mux") == 0) {
@@ -114,17 +136,22 @@ int arghandler(int *argc, char **argv[], char **port, int *runasd,
                          }
                          break;
                  case '?':
-                         if (optopt == 's' || optopt == 'l' || optopt == 's') // fungerar ej
-                                 fprintf (stderr, 
-                                     "Option -%c requires an argument.\n", 
-                                      optopt);
-                         else if (isprint (optopt))
+                         if (isprint (optopt)) {
                                  fprintf (stderr, "Unknown option `-%c'.\n", 
                                       optopt);
-                         else
+                         } else {
                                  fprintf (stderr,
                                       "Unknown option character `\\x%x'.\n",
                                       optopt);
+                         }
+                         return 1;
+                 case ':':
+                         if (optopt == 'p' || optopt == 'l' || optopt == 's') {
+                                 fprintf (stderr, 
+                                     "Option -%c requires an argument.\n", 
+                                      optopt);
+                         }
+                         return 1;
                  default:
                          return 1;
                  }
@@ -170,14 +197,14 @@ int main(int argc, char *argv[])
         socklen_t addr_size;
 
         if (configparser(&port, &handling, &path) != 0)
-                DIE("arghandler");
+                DIE("arghandler"); // exit(EXIT_FAILURE);
+
+        if (arghandler(&argc, &argv, &port, &runasd, &handling) != 0)
+                exit(EXIT_FAILURE);
 
         printf("port %s\n", port);
 
-        if (arghandler(&argc, &argv, &port, &runasd, &handling) != 0)
-                DIE("arghandler");
-
-        //openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
+        openlog("Webserver", LOG_PID, LOG_USER); //LOG_LRP
 
         if (runasd) {
                 printf("Starting daemon...\n");
@@ -206,9 +233,6 @@ int main(int argc, char *argv[])
                 exit(EXIT_FAILURE);
         }
 
-        if (port)
-                free(port);
-
         if ((sockfd = socket(res->ai_family, res->ai_socktype, 
             res->ai_protocol)) == -1)
                 DIE("socket");
@@ -222,10 +246,6 @@ int main(int argc, char *argv[])
                 close(sockfd);
                 DIE("listen");
         }
-
-        // Kan kanske göras i argumenthanteraren.
-        //if (uselogf)
-        //        fseek(logfile, 0, SEEK_END); //Sätter filpekaren till slutet av filen pga fork()?
 
         while(1) {
 
@@ -259,7 +279,7 @@ int main(int argc, char *argv[])
                         log_act(&li);
 
                         if (li.ipaddr)        free(li.ipaddr);
-                        if (li.status_line) free(li.status_line);
+                        if (li.status_line)   free(li.status_line);
 
                         fclose(errlog);
                         fclose(actlog);

@@ -20,33 +20,48 @@
 
 #define LASTMODLEN 35
 
-// global errno?
-
-void printall(char *ptr)
-{
-        char *p = ptr;
-        int k = 0;
-        while (*p != '\0') {
-                printf("%02d: %03d %c\n", k, *p, *p);
-                p++;
-                k++;
-        }
-        printf("\n\n");
-}
-
 int send_all(int sockfd, char *msg, size_t len, int flag)
 {
         char *ptr = msg;
         while (len > 0) {
                 int sent = send(sockfd, ptr, len, flag);
                 if (sent < 1)
-                        return 0;
+                        return -1;
                 ptr += sent;
                 len -= sent;
         }
-        // error buffer full
-        return -1;
+        return 0;
 }
+
+// could be made more general with end string and multiplier args, 
+// recv args could be struct
+int recv_all(int sockfd, char *buf, size_t len, int flag, part pt)
+{
+
+        char *ptr = buf;
+        int rx = 0;
+
+        char *apa = pt == STATUS_LINE ? "\r\n" : "\r\n\r\n";
+
+        int overflow = 0;
+        int recvend = 0;
+
+        while (!overflow && !recvend) {
+                if ((rx = recv(sockfd, ptr, len, 0)) == -1)
+                        return -1;
+
+                if (!(overflow = (len -= rx) < 0)) {
+                        ptr += rx;
+                        *ptr = '\0';
+                        recvend = strstr(buf, apa) != NULL 
+                            || strcmp(buf, "\r\n") == 0;
+                }
+        }
+        // set error msg buffer full
+
+        return overflow;
+}
+
 
 int set_msg(struct response *rsp, char *path)
 {
@@ -137,12 +152,6 @@ int interpret_stsl(char *rxheader, struct requestparams *rqp)
                 return BAD_REQUEST;
         }
 
-        /*
-         * TODO: "URL validation"
-         * undersök om fil är utanför rot, ex /../../
-         * return 403
-        */
-
         if (rqp->path == NULL)
                 return BAD_REQUEST;
         else if (strcmp(rqp->path, "/") == 0) 
@@ -155,36 +164,9 @@ int interpret_stsl(char *rxheader, struct requestparams *rqp)
         return OK; 
 }
 
-int recv_all(int sockfd, char *buf, size_t len, int flag, part pt)
-{
-
-        char *ptr = buf;
-        int rx = 0;
-
-        char *apa = pt == STATUS_LINE ? "\r\n" : "\r\n\r\n";
-
-        int overflow = 0;
-        int recvend = 0;
-
-        while (!overflow && !recvend) {
-                if ((rx = recv(sockfd, ptr, len, 0)) == -1)
-                        return -1;
-
-                if (!(overflow = (len -= rx) < 0)) {
-                        ptr += rx;
-                        *ptr = '\0';
-                        recvend = strstr(buf, apa) != NULL 
-                            || strcmp(buf, "\r\n") == 0;
-                }
-        }
-        // set error msg buffer full
-
-        return overflow;
-}
-
 int serve(int sockfd, struct loginfo *li)
 {
-        int res = 0;
+        int res = 1;
 
         char buf[BUFLEN];
         part pt;
@@ -192,8 +174,7 @@ int serve(int sockfd, struct loginfo *li)
         char *ptr = NULL;
         int all_in_one = 0;
 
-        char *stsl = NULL;
-        char *header = NULL;
+        char *stsl = NULL, *header = NULL;
 
         struct requestparams rqp;
 
@@ -221,7 +202,6 @@ int serve(int sockfd, struct loginfo *li)
                 pt = HEADER;
                 if (recv_all(sockfd, buf, BUFLEN - 1, 0, pt) != 0) {
                         log_err("recv_all()", strerror(errno), NULL, LOG_CRIT);
-                        res = 1;
                         goto cleanup;
                 }
                 header = strdup(buf);
@@ -229,26 +209,24 @@ int serve(int sockfd, struct loginfo *li)
 
         if (set_msg(&rsp, rqp.path) != 0) {
                 syslog(LOG_WARNING, " ");
-                res = 1;
                 goto cleanup;
         }
 
-        // sendall
-        if (send(sockfd, rsp.tx_stsl, strlen(rsp.tx_stsl), 0) == -1) {
+        if (send_all(sockfd, rsp.tx_stsl, strlen(rsp.tx_stsl), 0) == -1) {
                 syslog(LOG_WARNING, " ");
-                res = 1;
                 goto cleanup;
         }
 
         if (strcmp(rqp.method, "HEAD") != 0) {
                 if (sendfile(sockfd, rsp.in_fd, 0, rsp.sz) == -1) {
                         syslog(LOG_WARNING, " ");
-                        res = 1;
+                        goto cleanup;
                 }
         }
 
         li->sz = rsp.sz;
         li->code = rsp.stsc;
+        res = 0;
 
 cleanup:
         if (stsl)         free(stsl);
