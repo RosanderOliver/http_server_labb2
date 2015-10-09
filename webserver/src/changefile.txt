@@ -1,0 +1,42 @@
+void *threadRoutine(void *i){
+	//SEND DATA
+
+        struct loginfo li;
+        int sockfd= *((int *) i);
+
+        if (serve(sockfd, &li) != 0) {
+		 exit(EXIT_FAILURE);
+	}
+        log_act(&li);
+
+        pthread_exit(0);        
+        
+}
+
+if (handling == MUX) {
+		pthread_t thread;
+
+                printf("HEJSAN");
+
+
+		while (1){
+			addr_size = sizeof(their_addr);
+                        if ((new_fd = accept(sockfd, (struct sockaddr *) &their_addr, 
+		            &addr_size)) == -1) {
+		                perror("accept");
+		                continue;
+		        }
+
+                        //inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof(s));
+		        //li.ipaddr = strdup(s);
+                        int *i = malloc(sizeof(*i));
+                        *i=new_fd; 
+                        if (pthread_create( &thread, NULL, threadRoutine, i) < 0){
+                                perror("CoUld not create thread");
+                                exit(EXIT_FAILURE);
+                        }
+      
+	        }
+
+
+	}
